@@ -1,0 +1,258 @@
+---
+title: "Fibrilación Atrial. Adherencia tras ictus"
+author: "FISABIO"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document: 
+    theme: cerulean
+    highlight: breezedark
+    css: D:\Users\20833717H\Desktop\R_Projects\Opioids\Documentos\style.css
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+      code_folding: "none"
+
+---
+
+```{r setup, include=FALSE, echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+# Cargar librerías, funciones y Paths------------------------------------------
+w_dir <- file.path( "d:", "Users", "20833717H", "Desktop", "R_Projects")
+source(file.path(w_dir, "Opioids", "Scripts", "Funciones_Bases_de_Datos.R"))
+
+```
+
+```{r definir_plot, echo=FALSE, warning=FALSE, message=FALSE}
+# definir el estilo de los gráficos--------------------------------------------
+theme_set(theme_bw())
+tema_azul <- theme_update(
+  plot.background = element_rect(fill = "lightblue", colour = NA))
+
+# defnir cero días-------------------------------------------------------------
+zero_days = difftime(ymd("2000-01-01"), ymd("2000-01-01"), units = "days")
+
+fecha_inicio_estudio <- ymd("2009-01-01")
+fecha_fin_estudio <- ymd("2018-12-31")
+fecha_inicio_reclutamiento <- ymd("2010-01-01")
+fecha_fin_reclutamiento <- ymd("2017-12-31")
+
+# definir path-----------------------------------------------------------------
+path_FA <- file.path( "e:", "CERES1", "1PROYECTOS", "FA_ACO_SD1667", "COHORTE 2010-2017")
+path_FA_origenes <- file.path(path_FA, "1-ORIGINALES_unidas")
+path_FA_intermedias <- file.path(path_FA, "3-INTERMEDIAS")
+
+```
+
+
+```{r cargar_base}
+# cargar la base------------------------------------------------------------
+final_gaia <- fread(encoding = "UTF-8", sep = "|", nThread = 8,
+file = file.path(path_FA_origenes, "GAIA", "gaia_stata_clean.csv"))
+
+```
+
+```{r obtener_maestros}
+# manejar la base--------------------------------------------------------------
+# Presentación farmacéutica----------------------------------------------------
+maestro_pres_farma_FA <- final_gaia %>%
+  distinct(pres_farma_cod, pres_farma_desc)
+# Grupo ATC--------------------------------------------------------------------
+maestro_atc_FA <- final_gaia %>%
+  distinct(atc_cod, atc_desc)
+# Principio activo-------------------------------------------------------------
+maestro_prin_act_FA <- final_gaia %>%
+  distinct(prin_act_cod, prin_act_desc)
+
+fwrite(maestro_pres_farma_FA, append = FALSE, sep="|", 
+       file = file.path(path_FA_origenes,
+       "GAIA", "maestros", "maestro_pres_farma_FA.csv"))
+fwrite(maestro_atc_FA, append = FALSE, sep="|", 
+       file = file.path(path_FA_origenes,
+       "GAIA", "maestros", "maestro_atc_FA.csv"))
+fwrite(maestro_prin_act_FA, append = FALSE, sep="|", 
+       file = file.path(path_FA_origenes,
+       "GAIA", "maestros", "maestro_prin_act_FA.csv"))
+
+```
+
+```{r todas_n_formas, echo=TRUE, message=FALSE, warning=FALSE}
+# calcular todas n_formas----------------------------------------------------
+# cargar maestros
+maestro_pres_farma_FA <- fread(encoding = "UTF-8", sep = "|", nThread = 8, 
+file = file.path(path_FA_origenes,
+       "GAIA", "maestros", "maestro_pres_farma_FA.csv"))
+maestro_atc_FA <- fread(encoding = "UTF-8", sep = "|", nThread = 8, 
+file = file.path(path_FA_origenes,
+       "GAIA", "maestros", "maestro_atc_FA.csv"))
+maestro_prin_act_FA <- fread(encoding = "UTF-8", sep = "|", nThread = 8, 
+file = file.path(path_FA_origenes,
+       "GAIA", "maestros", "maestro_prin_act_FA.csv"))
+# extraer texto después de "/"-----------------------------------------------
+presentaciones_farma <- maestro_pres_farma_FA %>%
+mutate(
+  pres_farma_cod = as.factor(pres_farma_cod),
+  texto_forma = map_chr(pres_farma_desc, ~str_split(.x,
+  pattern = " / ", simplify = TRUE, n = 2)[,2]),
+# extraer el primer número después de "/"--------------------------------------
+  nforma = str_split(texto_forma, pattern = " ", simplify = TRUE, n = 3)[, 1],
+  forma = str_split(texto_forma, pattern = " ", simplify = TRUE, n = 3)[, 2])
+# arreglar presentaciones chungas----------------------------------------------
+formas <- presentaciones_farma %>% 
+  distinct(forma) %>% 
+  pull()
+# crear un tibble para cada forma----------------------------------------------
+tibble_list <- c()
+for (i in 1:length(formas)){
+tibble_list[[formas[i]]] <- presentaciones_farma %>% 
+  filter(forma == formas[i]) %>% 
+  arrange(nforma)}
+
+```
+
+```{r kable_presentaciones, echo=FALSE, warning=FALSE, message=FALSE}
+# comprobar tibbles------------------------------------------------------------
+# COMPRIMIDOS
+tibble_list$COMPRIMIDOS <- tibble_list$COMPRIMIDOS %>% 
+  mutate(nforma = str_replace(nforma, ",", ".")) # OK
+# SUPOSITORIOS
+tibble_list$SUPOSITORIOS # OK
+# SOBRES
+tibble_list$SOBRES # OK
+# CAPSULAS
+tibble_list$CAPSULAS # PROBLEMAS 1
+problemas_capsulas <- tibble_list$CAPSULAS %>% 
+  filter(nforma == "")
+# VIAL
+tibble_list$VIAL # OK
+# AMPOLLAS
+tibble_list$AMPOLLAS # OK
+# SOLUCION
+tibble_list$SOLUCION # OK
+# GRAGEAS
+tibble_list$GRAGEAS # OK
+# FRASCO
+tibble_list$FRASCO # OK
+# FRASCOS
+tibble_list$FRASCOS # OK
+# `30`
+tibble_list$`30` # PROBLEMAS 1
+# `60`
+tibble_list$`60` # PROBLEMAS 1
+# [[13]]
+tibble_list[[13]] # PROBLEMAS 2
+# COMPRIMIDO
+tibble_list$COMPRIMIDO # OK
+# SUSPENSION
+tibble_list$SUSPENSION # OK
+
+```
+
+```{r kable_presentaciones, echo=FALSE, warning=FALSE, message=FALSE}
+# arreglar frascos y gotas---------------------------------------------------
+p_farma <- presentaciones_farma %>%
+  mutate(nforma = str_replace(nforma, ",", ".")) %>% 
+  mutate(nforma = as.numeric(nforma)) %>% 
+  mutate(
+nforma = map2_dbl(pres_farma_cod, nforma, ~ dt_case_when(
+# Capsulas donde no se indica el número  
+  .x == 17171 ~ NA_real_,
+# Popurri  
+  .x == 12272 ~ 30,
+  .x == 12273 ~ 60,
+  .x == 16506	~ 20,
+  .x == 10923 ~ 20,
+  .x == 26277 ~ 1,
+  .x == 12452 ~ 1,
+# Frasco a dosis
+  .x == 5288	~ 200,
+  .x == 5287	~ 150,
+  .x == 5373	~ 300,
+  .x == 11282	~ 200,
+  .x == 16313	~ 50, 
+  .x == 18513	~ 30,
+  .x == 24759	~ 200,
+  .x == 25917 ~ 200,
+# FRASCOS a dosis
+  .x == 9440 ~ 150,	
+  .x == 23784 ~ 150,
+  T ~ .y)),
+forma = map2_chr(pres_farma_cod, forma, ~dt_case_when(
+# Popurri
+  .x == 12272 ~ "CAPSULAS",
+  .x == 12273 ~ "CAPSULAS",
+  .x == 16506	~ "SOBRES",
+  .x == 10923 ~ "COMPRIMIDOS",
+  .x == 26277 ~ "SUSPENSION",
+  .x == 12452 ~ "SUSPENSION",
+# Frasco a dosis
+  .x == 5288 ~ "ml",
+  .x == 5287 ~ "ml",
+  .x == 5373 ~ "ml",
+  .x == 11282 ~ "ml",
+  .x == 16313 ~ "ml",
+  .x == 18513 ~ "ml",
+  .x == 24759 ~ "ml",
+  .x == 25917 ~ "ml",
+# FRASCOS a dosis
+  .x == 9440 ~ "ml",	
+  .x == 23784 ~ "ml",  
+  T ~ .y))) %>% 
+  select(pres_farma_cod, pres_farma_desc, nforma, forma)
+
+p_farma2 <- p_farma %>% 
+  collap(~pres_farma_cod, FUN = fmode)
+
+fwrite(p_farma2, append = FALSE, sep = "|", file = file.path(path_FA_origenes,
+       "GAIA", "maestros", "maestro_pres_farma_FA_nformas.csv"))
+
+```
+
+<br>
+
+# Presentaciones farmaceúticas
+
+***
+
+<br>
+
+```{r kable_presentaciones, echo=FALSE, warning=FALSE, message=FALSE}
+# kable tabla------------------------------------------------------------------
+p_farma_pretty <- p_farma %>% 
+  mutate(nforma = prettyNum(nforma)) %>% 
+  arrange(pres_farma_cod)
+
+k <- kable(p_farma_pretty, align = "c", 
+      caption = 
+"Códigos y descripciones de todas las presentaciones farmacéuticas") %>%
+  kable_styling(bootstrap_options = c("striped", 
+                                      "hover", 
+                                      "condensed"),
+                full_width = FALSE, fixed_thead = T)  %>%
+  row_spec(0, bold = T, color = "white", background = "dodgerblue",
+           extra_css = "vertical-align:middle")
+
+save_kable(k, file = file.path(w_dir, "PREV2ST", "Resultados", "Tablas", "Pres_Farma_V0.html"), self_contained = TRUE) 
+
+k
+
+```
+
+
+```{r actualizar gaia, echo=FALSE, warning=FALSE, message=FALSE}
+# pegarle nformas--------------------------------------------------------------
+gaia_stata_clean2 <- final_gaia %>%
+  mutate(pres_farma_cod = factor(pres_farma_cod)) %>% 
+           inner_join(p_farma2 %>% 
+                       select(-pres_farma_desc),
+                                by = "pres_farma_cod")
+
+fwrite(gaia_stata_clean2, sep = "|", append = FALSE,
+       file = file.path(path_FA_intermedias, "PREV2_Ictus_Patrones", "gaia_stata_clean2.csv"))
+
+
+  
+```
+
+<div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>
+

@@ -1,0 +1,250 @@
+---
+title: "Fibrilación Atrial. Adherencia tras ictus"
+author: "FISABIO"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document: 
+    theme: cerulean
+    highlight: breezedark
+    css: D:\Users\20833717H\Desktop\R_Projects\Opioids\Documentos\style.css
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+      code_folding: "none"
+
+---
+
+```{r setup, include=FALSE, echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+# Cargar librerías, funciones y Paths------------------------------------------
+w_dir <- file.path( "d:", "Users", "20833717H", "Desktop", "R_Projects")
+source(file.path(w_dir, "Opioids", "Scripts", "Funciones_Bases_de_Datos.R"))
+
+```
+
+```{r definir_plot, echo=FALSE, warning=FALSE, message=FALSE}
+# definir el estilo de los gráficos--------------------------------------------
+theme_set(theme_bw())
+tema_azul <- theme_update(
+  plot.background = element_rect(fill = "lightblue", colour = NA))
+
+# defnir cero días-------------------------------------------------------------
+zero_days = difftime(ymd("2000-01-01"), ymd("2000-01-01"), units = "days")
+
+fecha_inicio_estudio <- ymd("2009-01-01")
+fecha_fin_estudio <- ymd("2018-12-31")
+fecha_inicio_reclutamiento <- ymd("2010-01-01")
+fecha_fin_reclutamiento <- ymd("2017-12-31")
+
+# definir path-----------------------------------------------------------------
+path_FA <- file.path( "e:", "CERES1", "1PROYECTOS", "FA_ACO_SD1667", "COHORTE 2010-2017")
+path_FA_origenes <- file.path(path_FA, "1-ORIGINALES_unidas")
+path_FA_intermedias <- file.path(path_FA, "3-INTERMEDIAS")
+
+```
+
+```{r cargar_bases}
+# cargar en csv----------------------------------------------------------------
+# Maestros
+maestro_pres_farma_FA <- fread(encoding = "UTF-8", sep = "|", nThread = 8, 
+file = file.path(path_FA_origenes,
+       "GAIA", "maestros", "maestro_pres_farma_FA.csv"))
+maestro_atc_FA <- fread(encoding = "UTF-8", sep = "|", nThread = 8, 
+file = file.path(path_FA_origenes,
+       "GAIA", "maestros", "maestro_atc_FA.csv"))
+maestro_prin_act_FA <- fread(encoding = "UTF-8", sep = "|", nThread = 8, 
+file = file.path(path_FA_origenes,
+       "GAIA", "maestros", "maestro_prin_act_FA.csv"))
+
+# Final GAIA
+final_gaia <- fread(encoding = "UTF-8", sep = "|", nThread = 8, 
+ file = file.path(path_FA_intermedias, "PREV2_Ictus_Patrones", "gaia_stata_clean2.csv"))
+
+```
+
+
+# Cálculo duración
+
+***
+
+<br>
+
+## Paso 1
+
+***
+
+Arreglar base
+
+```{r duracion_general, echo=TRUE, warning=FALSE, message=FALSE}
+# Definir códigos ATC oac_apt
+oac <- c("ACENOCUMAROL",
+         "APIXABAN",
+         "DABIGATRAN",
+         "RIVAROXABAN",
+         "WARFARINA",
+         "EDOXABAN")
+apt <- c("ACETILSALICILICO ACIDO",
+         "CLOPIDOGREL",
+         "CLOPIDOGREL + ACETILSALICILICO ACIDO",
+         "TICAGRELOR",
+         "PRASUGREL",
+         "TRIFLUSAL",
+         "CILOSTAZOL",
+         "TICLOPIDINA",
+         "DIPIRIDAMOL")
+# calcular duración general sin arreglar---------------------------------------
+final_oac_apt <- final_gaia %>%
+  fsubset(prin_act_desc %in% c(oac, apt)) %>% 
+  # añadir nforma a la base
+  inner_join(maestro_pres_farma_FA %>% 
+               select(-pres_farma_desc), by = "pres_farma_cod") %>% 
+  # redondear con precisión de 3 decimales en unidades y quitar negativos
+  ftransform(unidades = fifelse(unidades <= 0, NA_real_, round(unidades, 3)),
+  # si es 0 ó 1 pasar a 24, si no, redondear con precisión de 2 decimales
+         cadencia = fifelse(cadencia %in% c(0, 1), 24, round(cadencia, 2))) %>% 
+  # calcular unidades diarias
+  ftransform(unidades_dia = round(unidades * 24 / cadencia, 3))
+
+```
+
+### Códigos Presentación
+
+***
+
+En la siguiente tabla se muestran todas las presentaciones farmacéuticas de los anticoagulantes y antiplaquetarios
+
+<br>
+
+```{r cod_desc_pres_farma_e, echo=FALSE, warning=FALSE, message=FALSE}
+# añadir descripción al código de prescripción farmacéutica--------------------
+cod_desc_pres_farma_oac_apt <- final_oac_apt %>%
+   select(pres_farma_cod) %>%
+   distinct() %>%
+   left_join(maestro_pres_farma_FA) %>%
+   arrange(pres_farma_cod)  
+
+# kable tabla------------------------------------------------------------------
+kable(cod_desc_pres_farma_oac_apt, align = "c", 
+      caption = 
+"Códigos y descripciones de las presentaciones farmacéuticas de los oac y apt") %>%
+  kable_styling(bootstrap_options = c("striped", 
+                                      "hover", 
+                                      "condensed"),
+                fixed_thead = T)  %>%
+  row_spec(0, bold = T, color = "white", background = "dodgerblue",
+           extra_css = "vertical-align:middle")
+
+```
+
+<br>
+
+## Paso 2
+
+***
+
+Se calcula la duración de las recetas faltantes imputando por la moda(sip, pres_farma_cod) o por la moda(pres_farma_cod) o por la moda(principio activo).
+
+<br>
+
+```{r unidades, echo=FALSE, warning=FALSE, message=FALSE}
+# pasar a NA unidades_dia mayor que nforma-------------------------------------
+final_oac_apt <- final_oac_apt %>%
+  # calcular duraciones 1 (sin imputar faltantes)------------------------------
+  ftransform(duracion_1 = round(nforma/unidades_dia),
+         unidades_dia = fifelse(unidades_dia > nforma, 
+                                NA_real_, unidades_dia)) %>% 
+# moda sip presentacion--------------------------------------------------------
+  ftransform(n_sip_presentacion = fNobs(nreceta, 
+                          list(sip, pres_farma_cod), TRA = "replace_fill"),
+             moda_unidades_dia_sip_presentacion = fmode(unidades_dia, 
+                          list(sip, pres_farma_cod), TRA = "replace_fill")) %>% 
+# moda presentacion------------------------------------------------------------
+  ftransform(n_presentacion = fNobs(nreceta, pres_farma_cod,
+                                        TRA = "replace_fill"),
+             moda_unidades_dia_presentacion = fmode(unidades_dia, 
+                               pres_farma_cod, TRA = "replace_fill")) %>% 
+# moda principio activo--------------------------------------------------------
+  ftransform(n_prin_act = fNobs(nreceta, prin_act_cod,
+                                        TRA = "replace_fill"),
+             moda_unidades_dia_prin_act = fmode(unidades_dia, 
+                               prin_act_cod, TRA = "replace_fill")) %>% 
+# imputar modas----------------------------------------------------------------
+  # imputar por la moda del sip, presentacion
+  ftransform(unidades_dia = fifelse(is.na(unidades_dia),
+          moda_unidades_dia_sip_presentacion, unidades_dia)) %>%
+  # imputar por la moda de  la presentacion
+  ftransform(unidades_dia = fifelse(is.na(unidades_dia),
+          moda_unidades_dia_presentacion, unidades_dia)) %>%
+  # imputar por la moda de  la presentacion
+  ftransform(unidades_dia = fifelse(is.na(unidades_dia),
+          moda_unidades_dia_prin_act, unidades_dia)) %>%
+# calcular duracion_2----------------------------------------------------------
+  colorder(duracion_1, pos = "end") %>%
+  ftransform(duracion_2 = round(nforma/unidades_dia))
+
+duracion_ok <- final_oac_apt %>%
+  count(duracion_2) %>%
+  mutate(prop = round(100 * proportions(n), 4)) %>%
+  filter(prop >= 0.0150) %>%
+  arrange(desc(prop)) %>%
+  use_series(duracion_2)
+
+```
+
+<br>
+
+## Paso 3
+
+***
+
+Para eliminar valores de **duracion** exraños, se consideran válidos únicamente las duraciones que tienen una proporción > 0.015 \% del total. El resto de duraciones se imputan a la **moda(sip, pres_farma)** si esta es igual a algunas de las **duracion** > 0.015 \%, y si no, a la **moda(pres_farma)**.
+
+<br>
+
+```{r duracion_3, echo=FALSE, warning=FALSE, message=FALSE}
+# imputar duraciones poco frecuentes-------------------------------------------
+final_oac_apt <- final_oac_apt %>%
+  ftransform(duracion_3_0 = fifelse(duracion_2 %in% duracion_ok, 
+        duracion_2, round(nforma/moda_unidades_dia_sip_presentacion))) %>% 
+  ftransform(duracion_receta = fifelse(duracion_3_0 %in% duracion_ok, 
+          duracion_3_0, round(nforma/moda_unidades_dia_presentacion))) %>%
+  ftransform(duracion_receta = fifelse(duracion_receta %in% duracion_ok, 
+        duracion_receta, round(nforma/moda_unidades_dia_prin_act))) %>% 
+  select(-duracion_1, -duracion_2, -duracion_3_0)
+
+```
+
+## Paso 4
+
+Modificar duraciones conflictivas
+
+```{r comprobar_duraciones, echo=FALSE, warning=FALSE, message=FALSE}
+# guardar final benzo con duraciones-------------------------------------------
+final_oac_apt <- final_oac_apt %>% 
+# cambiar recetas con una duracion mayor de 500 a 120--------------------------
+mutate(duracion_receta = fifelse(duracion_receta >= 500, 120, duracion_receta)) # se cambian 19 recetas
+
+```
+
+
+```{r}
+duraciones_plot <- final_oac_apt %>%
+  count(duracion_receta, sort = TRUE) %>% 
+  arrange(duracion_receta)
+
+ggplot(duraciones_plot, aes(x = as.factor(duracion_receta),
+y = n, fill = as.factor(duracion_receta))) +
+  geom_col() +
+  xlab("días") +
+  ylab("n") +
+  ggtitle("Duración de la receta") +
+  theme(axis.text.x = element_text(size = 6, angle = 90, vjust = 0.4),
+        legend.position = "none")  
+  
+```
+
+```{r}
+fwrite(final_oac_apt, sep = "|", file.path(path_FA_intermedias, "PREV2_Ictus_Patrones", "final_oac_apt_duraciones.csv"))
+
+```
